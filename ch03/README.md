@@ -760,3 +760,310 @@ func main() {
 4   0.35  1  2  1  0    0.5         0.0     0.25
 5   0.10  2  2  0  0    1.0         0.0     0.50
 ```
+
+
+## Validation
+- overfit
+    - 過学習
+    - 訓練データに対して学習されているが、テストデータに対しては適合できていない、汎化できていない状態
+    - 統計モデルへの適合の媒介変数が多すぎる
+    - モデルが複雑で自由度が高すぎる
+    - 過学習を予防するためにモデルをバリデートする必要がある
+
+![overfitting](https://i.gyazo.com/071792d7ac15be920bf3d4db538d62d5.png)
+
+
+### Training and test sets
+- 最初に紹介するバリデーション方法は, 統計モデルをある量のデータセットで学習させ, 後, また別のデータでテストを行う方法
+    - 同じデータで, 学習とテストを行ってはいけない
+- 80/20 分割
+    - 80% のデータで学習し, 20% のデータでテストを行う
+- パラメータの変動を減らすのに十分な学習データが必要
+    - 変動の大きいパラメタが生成されるか, 数値的に収束しない
+        - 学習データが少なすぎる場合
+        - データポイントのサンプリングが不十分な場合
+
+![ideal point](https://i.gyazo.com/e9e76348f2ce672129dce381e4810337.png)
+
+
+#### Split dataset
+- データセットを学習データとテストデータに分ける方法
+    - `github.com/kniren/gota/dataframe` を利用する
+
+
+##### go code
+
+```go
+package main
+
+import (
+	"bufio"
+	"github.com/go-gota/gota/dataframe"
+	"log"
+	"os"
+)
+
+func main() {
+	//糖尿病のデータセットファイルを開く
+	f, err := os.Open("./diabetes.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// CSV ファイルからデータフレームを作成する
+	// 列の型は推論される
+	diabetesDF := dataframe.ReadCSV(f)
+
+	// 学習セット, テストセットの要素の数を数える
+	trainingNum := (4 * diabetesDF.Nrow()) / 5
+	testNum := diabetesDF.Nrow() / 5
+	if trainingNum+testNum < diabetesDF.Nrow() {
+		trainingNum++
+	}
+
+	// サブセットのインデックスを生成する
+	trainingIdx := make([]int, trainingNum)
+	testIdx := make([]int, testNum)
+
+	// 学習データのインデックスを列挙する
+	for i := 0; i < trainingNum; i++ {
+		trainingIdx[i] = i
+	}
+
+	// テストデータのインデックスを列挙する
+	for i := 0; i < testNum; i++ {
+		testIdx[i] = trainingNum + i
+	}
+
+	// 学習データとテストデータのサブセットを生成する
+	trainingDF := diabetesDF.Subset(trainingIdx)
+	testDF := diabetesDF.Subset(testIdx)
+
+	// それぞれのデータセットをファイルに書き込むためのマップを宣言する
+	setMap := map[int]dataframe.DataFrame{
+		0: trainingDF,
+		1: testDF,
+	}
+
+	// それぞれのファイルを生成する
+	for idx, setName := range []string{"training.csv", "test.csv"} {
+		// それぞれのデータセットファイルを生成
+		f, err := os.Create(setName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// バッファ付きライタを生成
+		w := bufio.NewWriter(f)
+		// CSV としてデータフレームの値を書き出す
+		if err := setMap[idx].WriteCSV(w); err != nil {
+			log.Fatal(err)
+		}
+
+		// log
+		log.Printf("dump %v", setName)
+	}
+}
+```
+
+
+### ホールドアウト法, Holdout set
+- 統計モデルをテストセットに繰り返し晒すことで, 統計モデルをテストデータに過学習させてしまう
+- 解決法
+    - ![holdout set](https://i.gyazo.com/daa265707936a6f4b39981e94d36a9a4.png)
+    - もとのデータを 3 つに分ける, 3 データセットバリデーション
+        1. 学習データ
+        2. テストデータ
+        3. Holdout set, バリデーションセット
+            - バリデーションセットは, 学習にも, テストにも使ってはいけない
+            - 統計モデルの学習が済んで、モデルの調整が終わって、受容可能な成果がテストデータセットで得られるまで
+- Pachyderm でもこの機能が提供されている
+
+
+### 交差検証, Cross validation
+- ここのモデルの汎化性能を評価する手法
+- 分類でも回帰でも用いることができる
+- k 分割交差検証
+    - データを k 個に分割してそのうち 1 つをテストデータとして, 残りを学習データとして評価する
+    - これを k 個すべてが 1 回ずつテストデータになるように k 回学習を行って精度の平均を取る
+- ![k-fold cross validation](https://i.gyazo.com/dc15bbf189cfbb95d8d39bd248452658.png)
+- メリットとデメリット
+    - すべてのデータセットを使用できるが, 統計モデルを学習サンプルとテストサンプルにより曝露することになる
+    - すでに便利な関数がある
+    - バイアスを防げる
+
+
+#### go packages
+- Golearn
+    - https://github.com/sjwhitworth/golearn
+- Chi-Merge 法
+    - https://sfchaos.hatenablog.com/entry/20131208/p1
+
+
+#### Go code
+- `go doc`
+
+
+```go
+package evaluation // import "github.com/sjwhitworth/golearn/evaluation"
+
+// GenerateCrossFoldValidationConfusionMatrices divides the data into a number of folds
+// then trains and evaluates the classifier on each fold, producing a new ConfusionMatrix.
+func GenerateCrossFoldValidationConfusionMatrices(data base.FixedDataGrid, cls base.Classifier, folds int) ([]ConfusionMatrix, error) {
+        _, rows := data.Size()
+
+        // Assign each row to a fold
+        foldMap := make([]int, rows)
+        inverseFoldMap := make(map[int][]int)
+        for i := 0; i < rows; i++ {
+                fold := rand.Intn(folds)
+                foldMap[i] = fold
+                if _, ok := inverseFoldMap[fold]; !ok {
+                        inverseFoldMap[fold] = make([]int, 0)
+                }
+                inverseFoldMap[fold] = append(inverseFoldMap[fold], i)
+        }
+
+        ret := make([]ConfusionMatrix, folds)
+
+        // Create training/test views for each fold
+        for i := 0; i < folds; i++ {
+                // Fold i is for testing
+                testData := base.NewInstancesViewFromVisible(data, inverseFoldMap[i], data.AllAttributes())
+                otherRows := make([]int, 0)
+                for j := 0; j < folds; j++ {
+                        if i == j {
+                                continue
+                        }
+                        otherRows = append(otherRows, inverseFoldMap[j]...)
+                }
+                trainData := base.NewInstancesViewFromVisible(data, otherRows, data.AllAttributes())
+                // Train
+                err := cls.Fit(trainData)
+                if err != nil {
+                        return nil, err
+                }
+                // Predict
+                pred, err := cls.Predict(testData)
+                if err != nil {
+                        return nil, err
+                }
+                // Evaluate
+                cf, err := GetConfusionMatrix(testData, pred)
+                if err != nil {
+                        return nil, err
+                }
+                ret[i] = cf
+        }
+        return ret, nil
+}
+```
+
+
+- example code of decision tree model
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"github.com/sjwhitworth/golearn/base"
+	"github.com/sjwhitworth/golearn/evaluation"
+	"github.com/sjwhitworth/golearn/filters"
+	"github.com/sjwhitworth/golearn/trees"
+	"log"
+	"math"
+)
+
+func main() {
+
+  // iris データセットを読み込む
+	iris, err := base.ParseCSVToInstances("./iris_headers.csv", true)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Discretise the iris dataset with Chi-Merge
+	// iris データセットを Chi-Merge 法で離散化する
+	filt := filters.NewChiMergeFilter(iris, 0.999)
+	for _, a := range base.NonClassFloatAttributes(iris) {
+		filt.AddAttribute(a)
+	}
+	filt.Train()
+	irisf := base.NewLazilyFilteredInstances(iris, filt)
+
+	// Create a 60-40 training-test split
+
+	//
+	// ID3 アルゴリズムを使用する
+	//
+	// デシジョンツリーモデルを定義する
+	// 剪定 pruning パラメタは 0.6
+	var tree base.Classifier
+	param := 0.6
+	tree = trees.NewID3DecisionTree(param)
+	// (Parameter controls train-prune split.)
+
+	// クロスバリデーションを実行する
+	cfs, err := evaluation.GenerateCrossFoldValidationConfusionMatrices(irisf, tree, 5)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// メトリックスを計算する
+	mean, variance := evaluation.GetCrossValidatedMetric(cfs, evaluation.GetAccuracy)
+	stdev := math.Sqrt(variance)
+
+	// 出力する
+	fmt.Printf("Pruning: %0.2f\t\tAvg. accuracy: %.2f (+/-2SD: %.2f)\n", param, mean, stdev*2)
+	// Output:
+	// Pruning: 0.60           Avg. accuracy: 0.72 (+/-2SD: 0.19)
+	fmt.Println("ID3 Performance (information gain)")
+	for i, _ := range cfs {
+		fmt.Println(evaluation.GetSummary(cfs[i]))
+	}
+	// Output:
+	/*
+	   ID3 Performance (information gain)
+	   Reference Class True Positives  False Positives True Negatives  Precision       Recall  F1 Score
+	   --------------- --------------  --------------- --------------  ---------       ------  --------
+	   Iris-setosa     9               6               13              0.6000          1.0000  0.7500
+	   Iris-versicolor 2               4               16              0.3333          0.2500  0.2857
+	   Iris-virginica  7               0               17              1.0000          0.6364  0.7778
+	   Overall accuracy: 0.6429
+
+	   Reference Class True Positives  False Positives True Negatives  Precision       Recall  F1 Score
+	   --------------- --------------  --------------- --------------  ---------       ------  --------
+	   Iris-setosa     12              8               16              0.6000          1.0000  0.7500
+	   Iris-versicolor 0               0               24              NaN             0.0000  NaN
+	   Iris-virginica  12              4               20              0.7500          1.0000  0.8571
+	   Overall accuracy: 0.6667
+
+	   Reference Class True Positives  False Positives True Negatives  Precision       Recall  F1 Score
+	   --------------- --------------  --------------- --------------  ---------       ------  --------
+	   Iris-setosa     10              7               15              0.5882          1.0000  0.7407
+	   Iris-versicolor 0               0               23              NaN             0.0000  NaN
+	   Iris-virginica  13              2               17              0.8667          1.0000  0.9286
+	   Overall accuracy: 0.7188
+
+	   Reference Class True Positives  False Positives True Negatives  Precision       Recall  F1 Score
+	   --------------- --------------  --------------- --------------  ---------       ------  --------
+	   Iris-setosa     11              9               14              0.5500          1.0000  0.7097
+	   Iris-versicolor 5               0               17              1.0000          0.2941  0.4545
+	   Iris-virginica  6               3               25              0.6667          1.0000  0.8000
+	   Overall accuracy: 0.6471
+
+	   Reference Class True Positives  False Positives True Negatives  Precision       Recall  F1 Score
+	   --------------- --------------  --------------- --------------  ---------       ------  --------
+	   Iris-setosa     8               1               11              0.8889          1.0000  0.9412
+	   Iris-versicolor 2               0               16              1.0000          0.5000  0.6667
+	   Iris-virginica  8               1               11              0.8889          1.0000  0.9412
+	   Overall accuracy: 0.9000
+	*/
+}
+```
+
+
+## Summary
+- 適切な評価項目を選択することと、評価/検証の手順をレイアウトすること
