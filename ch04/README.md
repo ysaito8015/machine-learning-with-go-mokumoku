@@ -738,3 +738,252 @@ func main() {
 
 
 - ![regression_line](https://i.gyazo.com/81637728393fdc7ea188cabf1e1a4686.png)
+
+
+
+## Multiple linear regression
+- 複数の説明変数を持つ
+- ![equation](https://latex.codecogs.com/gif.latex?y%20%3D%20m_1x_1%20&plus;%20m_2x_2%20&plus;%20...%20&plus;m_%7BN%7Dx_%7BN%7D%20&plus;%20b)
+    - x : 様々な独立変数
+    - m : 様々な傾き
+    - b : 切片
+
+
+### Assumptions of multiple linear regression
+- Overfitting
+    - 説明変数を追加すればするほど, モデルは複雑になる
+    - モデルが複雑に慣れば, 過学習のリスクが上がる
+    - 過学習を予防するテクニックは, regulatization
+        - 複雑なモデルに対してペナルティ値を生成する
+- Relative Scale
+    - ある説明変数のスケールが他の説明変数のスケールより大きい
+    - 変数を標準化することを検討
+
+
+### refine Sales model
+- ![equation](https://latex.codecogs.com/gif.latex?Sales%20%3D%20m_1%20%5Ccdot%20TV%20&plus;%20m_2%20%5Ccdot%20Radio%20&plus;%20b)
+
+
+#### Go code
+- training Model
+
+
+```go
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	"github.com/sajari/regression"
+	"log"
+	"os"
+	"strconv"
+)
+
+func main() {
+	// 学習データセットを開く
+	f, err := os.Open("./training.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// CSV reader を生成する
+	reader := csv.NewReader(f)
+
+	// CSV レコードをすべて読み込む
+	reader.FieldsPerRecord = 4
+	trainingData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 目的変数 Sales (y) を説明変数1 TV (x1) と
+	// 説明変数2 Radio (x2), 切片でモデル化する
+	// sajari/regression を使うモデルに必要な構造体を生成する
+	var r regression.Regression
+	r.SetObserved("Sales")
+	r.SetVar(0, "TV")
+	r.SetVar(1, "Radio")
+
+	// 学習データを線形モデルの値に対応させるためにループさせる
+	for i, record := range trainingData {
+
+		// ヘッダ行を飛ばす
+		if i == 0 {
+			continue
+		}
+
+		// 目的変数を Sales にパースする
+		yVal, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 説明変数 x1を TV にパースする
+		tvVal, err := strconv.ParseFloat(record[0], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 説明変数 x2 を Radio にパースする
+		radioVal, err := strconv.ParseFloat(record[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 目的変数と説明変数を, 線形モデルに対応させる
+		r.Train(regression.DataPoint(yVal, []float64{tvVal, radioVal}))
+
+	}
+
+	// 学習を実行する
+	r.Run()
+
+	// 学習したモデルパラメタを出力する
+	fmt.Printf("Regression Formula: %v\n", r.Formula)
+	// Output: Regression Formula: Predicted = 2.9318 + TV*0.0473 + Radio*0.1794
+}
+```
+
+
+- testing Model
+
+
+```go
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	"github.com/sajari/regression"
+	"log"
+	"math"
+	"os"
+	"strconv"
+)
+
+func main() {
+	// 学習データセットを開く
+	f, err := os.Open("./training.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// CSV reader を生成する
+	reader := csv.NewReader(f)
+
+	// CSV レコードをすべて読み込む
+	reader.FieldsPerRecord = 4
+	trainingData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// 目的変数 Sales (y) を説明変数1 TV (x1) と
+	// 説明変数2 Radio (x2), 切片でモデル化する
+	// sajari/regression を使うモデルに必要な構造体を生成する
+	var r regression.Regression
+	r.SetObserved("Sales")
+	r.SetVar(0, "TV")
+	r.SetVar(1, "Radio")
+
+	// 学習データを線形モデルの値に対応させるためにループさせる
+	for i, record := range trainingData {
+
+		// ヘッダ行を飛ばす
+		if i == 0 {
+			continue
+		}
+
+		// 目的変数を Sales にパースする
+		yVal, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 説明変数 x1を TV にパースする
+		tvVal, err := strconv.ParseFloat(record[0], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 説明変数 x2 を Radio にパースする
+		radioVal, err := strconv.ParseFloat(record[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 目的変数と説明変数を, 線形モデルに対応させる
+		r.Train(regression.DataPoint(yVal, []float64{tvVal, radioVal}))
+
+	}
+
+	// 学習を実行する
+	r.Run()
+
+	// 学習したモデルパラメタを出力する
+	fmt.Printf("Regression Formula: %v\n", r.Formula)
+	// Output: Regression Formula: Predicted = 2.9318 + TV*0.0473 + Radio*0.1794
+
+	// 学習データセットを開く
+	f, err = os.Open("./test.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// CSV reader を生成する
+	reader = csv.NewReader(f)
+
+	// CSV レコードをすべて読み込む
+	reader.FieldsPerRecord = 4
+	testData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// テストデータから, 目的変数を予測し, 予測結果を, MAE で評価する
+	var mAE float64
+	for i, record := range testData {
+
+		// ヘッダ行を飛ばす
+		if i == 0 {
+			continue
+		}
+
+		// テストデータの観測値 Sales をパースする
+		yObserved, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// テストデータの説明変数 TV をパースする
+		tvVal, err := strconv.ParseFloat(record[0], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// テストデータの説明変数 TV をパースする
+		radioVal, err := strconv.ParseFloat(record[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 学習済みモデルから, 目的変数を予測する
+		yPredicted, err := r.Predict([]float64{tvVal, radioVal})
+
+		// MAE に加算する
+		mAE += math.Abs(yObserved-yPredicted) / float64(len(testData))
+	}
+
+	// MAE を出力する
+	fmt.Printf("MAE = %0.2f\n", mAE)
+	// Output: MAE = 1.26
+}
+```
+
+- MAE = 1.26, improved
+
+## Nonlinear and other types of regression
