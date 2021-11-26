@@ -985,5 +985,306 @@ func main() {
 ```
 
 - MAE = 1.26, improved
+- NOTE:
+    - モデルを複雑にすればするほど
+        - シンプルさを犠牲にし
+        - 過学習の危険を含む
+    - モデルに説明変数を加えることは, モデルのパフォーマンスから得られるものが自身のユースケースでより高い価値を作るときに限る
 
 ## Nonlinear and other types of regression
+- 線形ではないモデルの構築
+    - 二乗, 指数関数など
+    - 過学習のリスクは常に上がっている
+- ![equation](https://latex.codecogs.com/gif.latex?Sales%20%3D%20m_1%20%5Ccdot%20TV%20&plus;%20m_2%20%5Ccdot%20TV%5E2%20&plus;%20m_3%20%5Ccdot%20TV%5E3%20&plus;%20b)
+    - https://github.com/sajari/regression
+        - linear regression のみ
+    - https://go-hep.org/x/hep/fit
+        - non-linear regression に対応
+        - https://pkg.go.dev/go-hep.org/x/hep/fit
+- OLS, Ordinary Least Squares, 最小二乗法
+- Ridge regression
+    - 回帰係数にペナルティを持つ
+    - https://github.com/berkmancenter/ridge
+        - 古い gonum を利用している
+    - https://github.com/adam-hanna/ridge
+        - 新しい gonum 対応版
+        - エラーで動かない
+    - 目的変数と説明変数は gonum マトリクスとして扱われる
+- Lasso regression
+    - 回帰係数にペナルティを持つ
+
+
+### ridge パッケージで学習
+- set intercept as 1.0
+    - Regression formula:      y = 3.038 + 0.047 TV + 0.177 Radio + 0.001 Newspaper
+
+
+```go
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	//"github.com/adam-hanna/ridge"
+	//"gonum.org/v1/gonum/mat"
+	"github.com/berkmancenter/ridge"
+	"github.com/gonum/matrix/mat64"
+	"log"
+	"os"
+	"strconv"
+)
+
+func main() {
+	// 学習データセットを開く
+	f, err := os.Open("./training.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// CSV reader を生成する
+	reader := csv.NewReader(f)
+
+	// CSV レコードをすべて読み込む
+	reader.FieldsPerRecord = 4
+	rawCSVData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// featureData スライスは, gonum での行列計算用に
+	// すべての float value を保持する
+	featureData := make([]float64, 4*len(rawCSVData))
+	yData := make([]float64, len(rawCSVData))
+
+	// featureIndex と yIndex は, 行列の現在示すインデクスを保持する
+	var featureIndex int
+	var yIndex int
+
+	// 学習データをスライスに対応させるためにループさせる
+	for i, record := range rawCSVData {
+
+		// ヘッダ行を飛ばす
+		if i == 0 {
+			continue
+		}
+
+		// 列全体をループさせる
+		for i, val := range record {
+
+			// csv の値を float に変換
+			valParsed, err := strconv.ParseFloat(val, 64)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			// Sales 以外の列の時
+			if i < 3 {
+
+				// 切片をモデルに加える
+				if i == 0 {
+					featureData[featureIndex] = 1
+					featureIndex++
+				}
+
+				// 対象のスライスに値を入れる
+				featureData[featureIndex] = valParsed
+				featureIndex++
+			}
+
+			if i == 3 {
+
+				// 目的変数のスライスに値を入れる
+				yData[yIndex] = valParsed
+				yIndex++
+			}
+		}
+	}
+
+	// gonum matrix を生成する
+	features := mat64.NewDense(len(rawCSVData), 4, featureData)
+	y := mat64.NewVector(len(rawCSVData), yData)
+
+	// RidgeRegression 構造体を New 関数で生成する
+	r := ridge.New(features, y, 1.0)
+
+	// 学習する
+	r.Regress()
+
+	// 出力する
+	c1 := r.Coefficients.At(0, 0)
+	c2 := r.Coefficients.At(1, 0)
+	c3 := r.Coefficients.At(2, 0)
+	c4 := r.Coefficients.At(3, 0)
+	fmt.Printf("Regression formula: \t y = %0.3f + %0.3f TV + %0.3f Radio + %0.3f Newspaper\n", c1, c2, c3, c4)
+	// Output:
+	// Regression formula:      y = 3.038 + 0.047 TV + 0.177 Radio + 0.001 Newspaper
+}
+```
+
+#### ridge パッケージをちょっと変更
+
+```go
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	"github.com/ysaito8015/ridge"
+	"gonum.org/v1/gonum/mat"
+	"log"
+	"os"
+	"strconv"
+)
+
+func main() {
+	f, err := os.Open("training.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = 4
+
+	rawCSVData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	featureData := make([]float64, 4*len(rawCSVData))
+	yData := make([]float64, len(rawCSVData))
+
+	var featureIndex int
+	var yIndex int
+
+	for idx, record := range rawCSVData {
+		if idx == 0 {
+			continue
+		}
+
+		for i, val := range record {
+			valParsed, err := strconv.ParseFloat(val, 64)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			if i < 3 {
+				if i == 0 {
+					featureData[featureIndex] = 1
+					featureIndex++
+				}
+
+				featureData[featureIndex] = valParsed
+				featureIndex++
+			}
+			if i == 3 {
+				yData[yIndex] = valParsed
+				yIndex++
+			}
+		}
+	}
+
+	features := mat.NewDense(len(rawCSVData), 4, featureData)
+	y := mat.NewVecDense(len(rawCSVData), yData)
+
+	r := ridge.New(features, y, 1.0)
+
+	r.Regress()
+
+	c1 := r.Coefficients.At(0, 0)
+	c2 := r.Coefficients.At(1, 0)
+	c3 := r.Coefficients.At(2, 0)
+	c4 := r.Coefficients.At(3, 0)
+	fmt.Printf("Regression formula:\n")
+	fmt.Printf("y = %0.3f + %0.3f TV + %0.3f Radio + %0.3f Newspaper\n", c1, c2, c3, c4)
+	// Output:
+	// y = 3.038 + 0.047 TV + 0.177 Radio + 0.001 Newspaper
+
+}
+```
+
+#### 学習済みモデルをテストする
+
+```go
+package main
+
+import (
+	"encoding/csv"
+	"fmt"
+	"log"
+	"math"
+	"os"
+	"strconv"
+)
+
+// ridge regression model の学習結果を利用する
+func predict(tv, radio, newspaper float64) float64 {
+	return 3.038 + 0.047*tv + 0.177*radio + 0.001*newspaper
+}
+
+func main() {
+	// テストデータセットを開く
+	f, err := os.Open("./test.csv")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+
+	// CSV reader を生成する
+	reader := csv.NewReader(f)
+
+	// CSV レコードをすべて読み込む
+	reader.FieldsPerRecord = 4
+	testData, err := reader.ReadAll()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// holdout data をループさせる. y の値を予測させて,
+	// MAE, Mean Absolute Error の値を計算する
+	var mAE float64
+	for i, record := range testData {
+
+		// ヘッダ行を飛ばす
+		if i == 0 {
+			continue
+		}
+
+		// Sales をパースする
+		yObserved, err := strconv.ParseFloat(record[3], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// TV をパースする
+		tvVal, err := strconv.ParseFloat(record[0], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Radio をパースする
+		radioVal, err := strconv.ParseFloat(record[1], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// Newspaper をパースする
+		newspaperVal, err := strconv.ParseFloat(record[2], 64)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// 学習済みモデルから y を予測する
+		yPredicted := predict(tvVal, radioVal, newspaperVal)
+
+		// 残差を MAE に加算する
+		mAE += math.Abs(yObserved-yPredicted) / float64(len(testData))
+	}
+
+	// MAE を出力する
+	fmt.Printf("MAE = %0.2f\n", mAE)
+	// Output:
+	// MAE = 1.26
+}
+```
